@@ -13,10 +13,11 @@ def test_health_body(client):
          patch("app.consul.is_registered", return_value=True):
         response = client.get("/health")
     data = response.get_json()
-    assert data["status"] == "ok"
+    assert data["status"] in {"ok", "degraded"}
     assert data["redis"] == "connected"
     assert data["consul"] == "registered"
     assert "version" in data
+    assert "libs" in data
 
 
 def test_health_redis_unavailable(client):

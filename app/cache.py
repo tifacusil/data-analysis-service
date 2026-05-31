@@ -1,4 +1,7 @@
+import hashlib
 import json
+from typing import Any, Mapping
+
 import redis
 
 CACHE_PREFIX = "analysis_cache:"
@@ -23,7 +26,30 @@ def get_cached(key: str):
 
 
 def set_cached(key: str, value: dict, ttl: int) -> None:
-    _get_client().setex(f"{CACHE_PREFIX}{key}", ttl, json.dumps(value))
+    try:
+        _get_client().setex(f"{CACHE_PREFIX}{key}", ttl, json.dumps(value))
+    except Exception:
+        return
+
+
+def make_analysis_cache_key(body: Mapping[str, Any]) -> str:
+    normalized = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"analysis:{digest}"
+
+
+def get_cached_json(key: str) -> dict | None:
+    try:
+        raw = get_cached(key)
+    except Exception:
+        return None
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except Exception:
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def ping() -> bool:

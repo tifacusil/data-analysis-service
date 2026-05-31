@@ -12,17 +12,24 @@ VALID_PAYLOAD = {
 }
 
 
-def test_predict_returns_501(client):
+def test_predict_returns_200(client):
     response = client.post("/analysis/predict", json=VALID_PAYLOAD)
-    assert response.status_code == 501
+    assert response.status_code == 200
     data = response.get_json()
-    assert data["error"] == "not_implemented"
+    assert "predicted_values" in data
+    assert "predicted_timestamps" in data
+    assert len(data["predicted_values"]) == VALID_PAYLOAD["horizon"]
+    assert len(data["predicted_timestamps"]) == VALID_PAYLOAD["horizon"]
+    assert data["model"] in {"arima", "gm11"}
 
 
 def test_predict_without_arima_order(client):
     payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "arima_order"}
     response = client.post("/analysis/predict", json=payload)
-    assert response.status_code == 501
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "predicted_values" in data
+    assert len(data["predicted_values"]) == VALID_PAYLOAD["horizon"]
 
 
 def test_predict_missing_field_returns_400(client):

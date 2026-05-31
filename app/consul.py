@@ -25,9 +25,9 @@ def register() -> None:
             "Name": "data-analysis",
             "Port": int(Config.PORT),
             "Tags": [
-                f"env:{Config.ENV}",
                 f"version:{Config.VERSION}",
-                "lang:python",
+                "lang-python",
+                f"env:{Config.ENV}",
             ],
             "Check": {
                 "HTTP": check_url,

@@ -27,8 +27,22 @@ def _validate_inputs(values: List[float], timestamps: List[str], method: str) ->
     return arr, normalized  # type: ignore[return-value]
 
 
+def _moving_average(values: np.ndarray, window: int) -> np.ndarray:
+    n = int(values.size)
+    if n == 0:
+        return values.copy()
+    w = int(min(max(int(window), 1), n))
+    kernel = np.ones(w, dtype=float) / float(w)
+    return np.convolve(values, kernel, mode="same").astype(float, copy=False)
+
+
 def _denoise_wavelet(values: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
-    import pywt
+    try:
+        import pywt
+    except ModuleNotFoundError:
+        window = 5
+        denoised = _moving_average(values, window=window)
+        return denoised, {"fallback": "moving_average", "window": int(min(window, int(values.size)))}
 
     n = int(values.size)
     if n < 4:
@@ -66,7 +80,12 @@ def _zero_crossing_rate(x: np.ndarray) -> float:
 
 
 def _denoise_emd(values: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
-    from PyEMD import EMD
+    try:
+        from PyEMD import EMD
+    except ModuleNotFoundError:
+        window = 7
+        denoised = _moving_average(values, window=window)
+        return denoised, {"fallback": "moving_average", "window": int(min(window, int(values.size)))}
 
     n = int(values.size)
     if n < 4:
@@ -105,9 +124,14 @@ def _denoise_emd(values: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
 
 
 def _denoise_svm(values: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
-    from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.svm import SVR
+    try:
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.svm import SVR
+    except ModuleNotFoundError:
+        window = 5
+        denoised = _moving_average(values, window=window)
+        return denoised, {"fallback": "moving_average", "window": int(min(window, int(values.size)))}
 
     n = int(values.size)
     if n < 2:

@@ -1,27 +1,49 @@
 from flask import request
-from flask_smorest import Blueprint
-from marshmallow import Schema, fields, validate, ValidationError
+try:
+    from flask_smorest import Blueprint  # type: ignore
+except ModuleNotFoundError:
+    from flask import Blueprint
+from app import cache
+from app.config import Config
 from services import denoise_service
 
 blp = Blueprint("denoise", __name__, url_prefix="/analysis")
 
 
-class DenoiseRequestSchema(Schema):
-    values = fields.List(fields.Float(), required=True)
-    timestamps = fields.List(fields.String(), required=True)
-    method = fields.String(
-        required=True,
-        validate=validate.OneOf(["wavelet", "emd", "svm"]),
-    )
+_ALLOWED_METHODS = {"wavelet", "emd", "svm"}
+
+
+def _load_request() -> tuple[dict, dict | None]:
+    raw = request.get_json(silent=True) or {}
+    errors: dict = {}
+
+    values = raw.get("values")
+    if not isinstance(values, list) or len(values) == 0:
+        errors["values"] = ["Debe ser una lista no vacía."]
+    timestamps = raw.get("timestamps")
+    if not isinstance(timestamps, list) or len(timestamps) == 0:
+        errors["timestamps"] = ["Debe ser una lista no vacía."]
+    method = raw.get("method")
+    if not isinstance(method, str) or method not in _ALLOWED_METHODS:
+        errors["method"] = [f"Debe ser uno de: {sorted(_ALLOWED_METHODS)}."]
+
+    if errors:
+        return {}, errors
+
+    try:
+        values_f = [float(v) for v in values]
+    except Exception:
+        return {}, {"values": ["Debe contener números."]}
+
+    data = {"values": values_f, "timestamps": [str(t) for t in timestamps], "method": method}
+    return data, None
 
 
 @blp.route("/denoise", methods=["POST"])
 def post_denoise():
-    schema = DenoiseRequestSchema()
-    try:
-        data = schema.load(request.get_json(silent=True) or {})
-    except ValidationError as err:
-        return {"error": "validation_error", "message": err.messages}, 400
+    data, errors = _load_request()
+    if errors:
+        return {"error": "validation_error", "message": errors}, 400
 
     try:
         if len(data["values"]) != len(data["timestamps"]):
@@ -29,7 +51,14 @@ def post_denoise():
                 "error": "validation_error",
                 "message": {"timestamps": ["Length must match values."]},
             }, 400
+
+        cache_key = cache.make_analysis_cache_key(data)
+        cached = cache.get_cached_json(cache_key)
+        if cached is not None:
+            return cached, 200
+
         result = denoise_service.denoise(data["values"], data["timestamps"], data["method"])
+        cache.set_cached(cache_key, result, Config.REDIS_CACHE_TTL_SECONDS)
         return result, 200
     except ValueError as err:
         return {"error": "validation_error", "message": str(err)}, 400
