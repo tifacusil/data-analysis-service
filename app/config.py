@@ -7,6 +7,7 @@ class Config:
     ENV = os.environ.get("ANALYSIS__ENV", "dev")
     VERSION = os.environ.get("ANALYSIS__VERSION", "1.0.0")
     INSTANCE_ID = os.environ.get("ANALYSIS__INSTANCE_ID", "data-analysis-01")
+    PUBLIC_URL_PREFIX = (os.environ.get("ANALYSIS__PUBLIC_URL_PREFIX", "") or "").strip()
 
     REDIS_HOST = os.environ.get("ANALYSIS__REDIS__HOST", "localhost")
     REDIS_PORT = int(os.environ.get("ANALYSIS__REDIS__PORT", 6379))
@@ -29,3 +30,5 @@ class Config:
     OPENAPI_URL_PREFIX = "/"
     OPENAPI_SWAGGER_UI_PATH = "/swagger-ui"
     OPENAPI_SWAGGER_UI_URL = "https://cdn.jsdelivr.net/npm/swagger-ui-dist/"
+    _normalized_prefix = (PUBLIC_URL_PREFIX.rstrip("/") if PUBLIC_URL_PREFIX else "")
+    OPENAPI_SWAGGER_UI_CONFIG = {"url": f"{_normalized_prefix}/openapi.json"}
