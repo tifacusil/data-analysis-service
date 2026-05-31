@@ -10,11 +10,36 @@ VALID_PAYLOAD = {
 }
 
 
-def test_denoise_returns_501(client):
+def test_denoise_wavelet_returns_200(client):
     response = client.post("/analysis/denoise", json=VALID_PAYLOAD)
-    assert response.status_code == 501
+    assert response.status_code == 200
     data = response.get_json()
-    assert data["error"] == "not_implemented"
+    assert data["method"] == "wavelet"
+    assert isinstance(data["denoised_values"], list)
+    assert len(data["denoised_values"]) == len(VALID_PAYLOAD["values"])
+    assert "params" in data
+
+
+def test_denoise_emd_returns_200(client):
+    payload = {**VALID_PAYLOAD, "method": "emd"}
+    response = client.post("/analysis/denoise", json=payload)
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["method"] == "emd"
+    assert isinstance(data["denoised_values"], list)
+    assert len(data["denoised_values"]) == len(VALID_PAYLOAD["values"])
+    assert "params" in data
+
+
+def test_denoise_svm_returns_200(client):
+    payload = {**VALID_PAYLOAD, "method": "svm"}
+    response = client.post("/analysis/denoise", json=payload)
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["method"] == "svm"
+    assert isinstance(data["denoised_values"], list)
+    assert len(data["denoised_values"]) == len(VALID_PAYLOAD["values"])
+    assert "params" in data
 
 
 def test_denoise_missing_field_returns_400(client):

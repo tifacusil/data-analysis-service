@@ -24,11 +24,12 @@ def post_denoise():
         return {"error": "validation_error", "message": err.messages}, 400
 
     try:
-        denoise_service.denoise(
-            data["values"], data["timestamps"], data["method"]
-        )
-    except NotImplementedError:
-        return {
-            "error": "not_implemented",
-            "message": "Denoising not yet implemented (Card 4A2)",
-        }, 501
+        if len(data["values"]) != len(data["timestamps"]):
+            return {
+                "error": "validation_error",
+                "message": {"timestamps": ["Length must match values."]},
+            }, 400
+        result = denoise_service.denoise(data["values"], data["timestamps"], data["method"])
+        return result, 200
+    except ValueError as err:
+        return {"error": "validation_error", "message": str(err)}, 400
