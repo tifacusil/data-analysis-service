@@ -1,7 +1,16 @@
 import atexit
 from flask import Flask
 from flask_smorest import Api
+from flask_cors import CORS
 from app.config import Config
+
+_ALLOWED_ORIGINS = [
+    "https://vite-ews-frontend.vercel.app",
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+]
 
 
 def create_app(config=None):
@@ -9,6 +18,8 @@ def create_app(config=None):
     app.config.from_object(Config)
     if config:
         app.config.update(config)
+
+    CORS(app, origins=_ALLOWED_ORIGINS)
 
     api = Api(app)
 
