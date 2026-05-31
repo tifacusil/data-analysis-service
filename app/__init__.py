@@ -1,6 +1,15 @@
 import atexit
 from flask import Flask
+from flask_cors import CORS
 from app.config import Config
+
+_ALLOWED_ORIGINS = [
+    "https://vite-ews-frontend.vercel.app",
+    "http://localhost",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+]
 
 
 def create_app(config=None):
@@ -15,6 +24,7 @@ def create_app(config=None):
         Api = None  # type: ignore[assignment]
 
     api = Api(app) if Api is not None else None
+    CORS(app, origins=_ALLOWED_ORIGINS)
 
     from app.routes.health import blp as health_blp
     from app.routes.outliers import blp as outliers_blp
