@@ -7,6 +7,8 @@ class Config:
     ENV = os.environ.get("ANALYSIS__ENV", "dev")
     VERSION = os.environ.get("ANALYSIS__VERSION", "1.0.0")
     INSTANCE_ID = os.environ.get("ANALYSIS__INSTANCE_ID", "data-analysis-01")
+
+    ROUTE_PREFIX = (os.environ.get("ANALYSIS__ROUTE_PREFIX", "") or "").strip()
     PUBLIC_URL_PREFIX = (os.environ.get("ANALYSIS__PUBLIC_URL_PREFIX", "") or "").strip()
 
     REDIS_HOST = os.environ.get("ANALYSIS__REDIS__HOST", "localhost")

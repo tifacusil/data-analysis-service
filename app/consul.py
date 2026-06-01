@@ -18,7 +18,7 @@ def register() -> None:
             check_host = "127.0.0.1"
 
         check_port = int(Config.PORT)
-        prefix = (Config.PUBLIC_URL_PREFIX or "").strip()
+        prefix = (Config.ROUTE_PREFIX or "").strip()
         if prefix and not prefix.startswith("/"):
             prefix = f"/{prefix}"
         prefix = prefix.rstrip("/")
