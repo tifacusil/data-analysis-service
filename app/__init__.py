@@ -17,11 +17,11 @@ def create_app(config=None):
     if config:
         app.config.update(config)
 
-    public_prefix = (Config.PUBLIC_URL_PREFIX or "").strip()
-    if public_prefix and not public_prefix.startswith("/"):
-        public_prefix = f"/{public_prefix}"
-    public_prefix = public_prefix.rstrip("/")
-    url_prefix = public_prefix or None
+    route_prefix = (Config.ROUTE_PREFIX or "").strip()
+    if route_prefix and not route_prefix.startswith("/"):
+        route_prefix = f"/{route_prefix}"
+    route_prefix = route_prefix.rstrip("/")
+    url_prefix = route_prefix or None
     if url_prefix:
         app.config["OPENAPI_URL_PREFIX"] = url_prefix
 

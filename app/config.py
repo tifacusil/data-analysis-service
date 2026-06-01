@@ -32,5 +32,10 @@ class Config:
     OPENAPI_URL_PREFIX = "/"
     OPENAPI_SWAGGER_UI_PATH = "/swagger-ui"
     OPENAPI_SWAGGER_UI_URL = "https://cdn.jsdelivr.net/npm/swagger-ui-dist/"
-    _normalized_prefix = (PUBLIC_URL_PREFIX.rstrip("/") if PUBLIC_URL_PREFIX else "")
-    OPENAPI_SWAGGER_UI_CONFIG = {"url": f"{_normalized_prefix}/openapi.json"}
+    _public_prefix = (PUBLIC_URL_PREFIX or "").strip()
+    if _public_prefix and not _public_prefix.startswith("/"):
+        _public_prefix = f"/{_public_prefix}"
+    _public_prefix = _public_prefix.rstrip("/")
+
+    OPENAPI_SWAGGER_UI_CONFIG = {"url": "openapi.json"}
+    API_SPEC_OPTIONS = {"servers": [{"url": (_public_prefix or "/")}]}
