@@ -54,6 +54,15 @@ def _gm11_payload(n=8, horizon=3):
     }
 
 
+VALID_PAYLOAD = {
+    "values": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+    "timestamps": _make_timestamps(10),
+    "model": "arima",
+    "horizon": 5,
+    "arima_order": [1, 1, 1],
+}
+
+
 def test_arima_basic(client):
     payload = _arima_payload(n=10, horizon=5)
     with patch("app.cache.get_cached", return_value=None), patch("app.cache.set_cached"):

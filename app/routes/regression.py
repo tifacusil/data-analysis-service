@@ -76,20 +76,6 @@ def post_regression():
         return {"error": "validation_error", "message": "timestamps and values must have the same length"}, 400
 
     try:
-        cache_key = cache.make_analysis_cache_key(data)
-        cached = cache.get_cached_json(cache_key)
-        if cached is not None:
-            return cached, 200
-
-        result = regression_service.fit_regression(
-            data["values"],
-            data["timestamps"],
-            data["model"],
-            data.get("degree", 3),
-        )
-        cache.set_cached(cache_key, result, Config.REDIS_CACHE_TTL_SECONDS)
-        return result, 200
-    except NotImplementedError:
         pd.to_datetime(timestamps, utc=True)
     except Exception:
         return {"error": "validation_error", "message": "timestamps contains invalid ISO-8601 dates"}, 400
