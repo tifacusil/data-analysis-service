@@ -27,6 +27,7 @@ def create_app(config=None):
 
     try:
         from flask_smorest import Api  # type: ignore
+        import marshmallow
     except ModuleNotFoundError:
         Api = None  # type: ignore[assignment]
 

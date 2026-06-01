@@ -1,7 +1,10 @@
 try:
     from flask_smorest import Blueprint  # type: ignore
+    from marshmallow import Schema, fields, validate
+    _HAS_OPENAPI = True
 except ModuleNotFoundError:
     from flask import Blueprint
+    _HAS_OPENAPI = False
 import hashlib
 import json
 
@@ -16,6 +19,38 @@ blp = Blueprint("predict", __name__, url_prefix="/analysis")
 
 
 _ALLOWED_MODELS = {"arima", "gm11"}
+
+if _HAS_OPENAPI:
+    class PredictRequestSchema(Schema):
+        values = fields.List(
+            fields.Float(),
+            required=True,
+            metadata={"example": [1.2, 3.4, 2.8, 2.1]},
+        )
+        timestamps = fields.List(
+            fields.String(),
+            required=True,
+            metadata={
+                "example": [
+                    "2019-06-01T00:00:00Z",
+                    "2019-06-02T00:00:00Z",
+                    "2019-06-03T00:00:00Z",
+                    "2019-06-04T00:00:00Z",
+                ]
+            },
+        )
+        model = fields.String(
+            required=True,
+            validate=validate.OneOf(sorted(_ALLOWED_MODELS)),
+            metadata={"example": "arima"},
+        )
+        horizon = fields.Integer(required=True, metadata={"example": 30})
+        arima_order = fields.List(
+            fields.Integer(),
+            load_default=None,
+            validate=validate.Length(equal=3),
+            metadata={"example": [1, 1, 1]},
+        )
 
 
 def _load_request() -> tuple[dict, dict | None]:
@@ -70,12 +105,7 @@ def _load_request() -> tuple[dict, dict | None]:
     return data, None
 
 
-@blp.route("/predict", methods=["POST"])
-def post_predict():
-    data, errors = _load_request()
-    if errors:
-        return {"error": "validation_error", "message": errors}, 400
-
+def _handle_predict(data):
     values = data["values"]
     timestamps = data["timestamps"]
     model = data["model"]
@@ -132,3 +162,17 @@ def post_predict():
         current_app.logger.warning("Redis unavailable, skipping cache write")
 
     return result, 200, {"X-Cache": "MISS"}
+
+
+if _HAS_OPENAPI:
+    @blp.route("/predict", methods=["POST"])
+    @blp.arguments(PredictRequestSchema, location="json")
+    def post_predict(data):
+        return _handle_predict(data)
+else:
+    @blp.route("/predict", methods=["POST"])
+    def post_predict():
+        data, errors = _load_request()
+        if errors:
+            return {"error": "validation_error", "message": errors}, 400
+        return _handle_predict(data)
