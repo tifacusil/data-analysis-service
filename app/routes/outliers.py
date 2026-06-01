@@ -54,6 +54,8 @@ def _load_request() -> tuple[dict, dict | None]:
     method = raw.get("method")
     if not isinstance(method, str) or method not in _ALLOWED_METHODS:
         errors["method"] = [f"Debe ser uno de: {sorted(_ALLOWED_METHODS)}."]
+    if isinstance(values, list) and isinstance(timestamps, list) and len(values) != len(timestamps):
+        errors["timestamps"] = ["Debe tener la misma longitud que values."]
 
     if errors:
         return {}, errors
@@ -80,6 +82,8 @@ if _HAS_OPENAPI:
             result = outliers_service.detect_outliers(
                 data["values"], data["timestamps"], data["method"]
             )
+        except ValueError as e:
+            return {"error": "validation_error", "message": str(e)}, 400
         except NotImplementedError:
             return {
                 "error": "not_implemented",
@@ -104,6 +108,8 @@ else:
             result = outliers_service.detect_outliers(
                 data["values"], data["timestamps"], data["method"]
             )
+        except ValueError as e:
+            return {"error": "validation_error", "message": str(e)}, 400
         except NotImplementedError:
             return {
                 "error": "not_implemented",

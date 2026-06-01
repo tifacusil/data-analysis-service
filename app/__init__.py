@@ -1,5 +1,6 @@
 import atexit
 from flask import Flask
+from werkzeug.exceptions import UnprocessableEntity
 from app.config import Config
 
 _ALLOWED_ORIGINS = [
@@ -16,6 +17,14 @@ def create_app(config=None):
     app.config.from_object(Config)
     if config:
         app.config.update(config)
+
+    @app.errorhandler(UnprocessableEntity)
+    def _handle_unprocessable_entity(err: UnprocessableEntity):
+        data = getattr(err, "data", None) or {}
+        messages = data.get("messages")
+        if messages is None:
+            return {"error": "validation_error", "message": "Invalid request body."}, 400
+        return {"error": "validation_error", "message": messages}, 400
 
     route_prefix = (Config.ROUTE_PREFIX or "").strip()
     if route_prefix and not route_prefix.startswith("/"):

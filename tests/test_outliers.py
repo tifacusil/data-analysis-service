@@ -10,11 +10,14 @@ VALID_PAYLOAD = {
 }
 
 
-def test_outliers_returns_501(client):
+def test_outliers_returns_200(client):
     response = client.post("/analysis/outliers", json=VALID_PAYLOAD)
-    assert response.status_code == 501
+    assert response.status_code == 200
     data = response.get_json()
-    assert data["error"] == "not_implemented"
+    assert data["method"] == "3sigma"
+    assert "outliers" in data
+    assert "statistics" in data
+    assert data["statistics"]["n"] == 4
 
 
 def test_outliers_missing_field_returns_400(client):
