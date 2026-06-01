@@ -18,7 +18,12 @@ def register() -> None:
             check_host = "127.0.0.1"
 
         check_port = int(Config.PORT)
-        check_url = f"http://{check_host}:{check_port}/health"
+        prefix = (Config.PUBLIC_URL_PREFIX or "").strip()
+        if prefix and not prefix.startswith("/"):
+            prefix = f"/{prefix}"
+        prefix = prefix.rstrip("/")
+        check_path = f"{prefix}/health" if prefix else "/health"
+        check_url = f"http://{check_host}:{check_port}{check_path}"
 
         payload = {
             "ID": Config.INSTANCE_ID,
