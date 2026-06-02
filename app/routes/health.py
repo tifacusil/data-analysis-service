@@ -5,7 +5,7 @@ except ModuleNotFoundError:
 from app import cache, consul
 from app.config import Config
 
-blp = Blueprint("health", __name__)
+blp = Blueprint("health", __name__, url_prefix="/analysis")
 
 
 def _import_available(module_name: str) -> bool:
@@ -16,8 +16,7 @@ def _import_available(module_name: str) -> bool:
         return False
 
 
-
-@blp.route("/analysis/health", methods=["GET"])
+@blp.route("/health", methods=["GET"])
 def health():
     redis_status = "connected" if cache.ping() else "unavailable"
     consul_status = "registered" if consul.is_registered() else "unregistered"
