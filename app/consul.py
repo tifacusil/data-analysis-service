@@ -22,7 +22,7 @@ def register() -> None:
         if prefix and not prefix.startswith("/"):
             prefix = f"/{prefix}"
         prefix = prefix.rstrip("/")
-        check_path = f"{prefix}/health" if prefix else "/health"
+        check_path = f"{prefix}/analysis/health" if prefix else "/analysis/health"
         check_url = f"http://{check_host}:{check_port}{check_path}"
 
         payload = {

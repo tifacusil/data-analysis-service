@@ -17,7 +17,7 @@ def _import_available(module_name: str) -> bool:
 
 
 
-@blp.route("/health", methods=["GET"])
+@blp.route("/analysis/health", methods=["GET"])
 def health():
     redis_status = "connected" if cache.ping() else "unavailable"
     consul_status = "registered" if consul.is_registered() else "unregistered"
