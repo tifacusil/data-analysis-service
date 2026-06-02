@@ -1,60 +1,407 @@
 # data-analysis-service
 
-Time-series analysis microservice for landslide monitoring (Bai et al., 2020).
-Provides outlier detection, denoising, regression, and prediction over displacement
-sensor data via a REST API.
+Time-series analysis microservice for landslide / displacement sensor monitoring.
+Provides outlier detection, denoising, regression, and prediction over sensor data via a REST API.
 
-> **Status:** skeleton (Card 4X0). All analysis endpoints return `501 Not Implemented`
-> until cards 4A1–4B2 are completed. The `/health` endpoint is fully operational.
+- **Base URL (local):** `http://localhost:8090`
+- **Base URL (production):** configure via `ANALYSIS__PUBLIC_URL_PREFIX`
+- **Route prefix:** all paths below assume `ANALYSIS__ROUTE_PREFIX=/analysis` (the deployed default)
+- **Swagger UI:** `{base}/swagger-ui`
+- **Content-Type:** all requests and responses are `application/json`
+- **Auth:** none (CORS restricted to allowed origins)
 
 ---
 
 ## Table of contents
 
-- [Architecture overview](#architecture-overview)
-- [Getting started](#getting-started)
-- [Project structure](#project-structure)
+- [Endpoints at a glance](#endpoints-at-a-glance)
+- [Common request shape](#common-request-shape)
+- [Common error shape](#common-error-shape)
+- [GET /analysis/health](#get-analysishealth)
+- [POST /analysis/outliers](#post-analysisoutliers)
+- [POST /analysis/denoise](#post-analysisdenoise)
+- [POST /analysis/regression](#post-analysisregression)
+- [POST /analysis/predict](#post-analysispredict)
+- [Caching](#caching)
+- [Running locally](#running-locally)
 - [Configuration](#configuration)
-- [Endpoints](#endpoints)
 - [Running tests](#running-tests)
-- [Adding a new algorithm (cards 4A1–4B2)](#adding-a-new-algorithm)
 - [Deploy](#deploy)
-- [Cards](#cards)
 
 ---
 
-## Architecture overview
+## Endpoints at a glance
 
-```
-HTTP client
-    │
-    ▼
-app/routes/          ← Flask blueprints: validate request, call service, shape response
-    │
-    ▼
-services/            ← Business logic (NotImplementedError stubs until cards land)
-    │
-    ├── app/cache.py ← Redis wrapper (prefix analysis_cache:)
-    └── app/consul.py← Consul registration (HTTP API via requests)
-```
-
-- **Framework:** Flask 3 + flask-smorest (OpenAPI/Swagger auto-generation)
-- **Validation:** marshmallow schemas — invalid requests return `400` before the service is called
-- **Cache:** Redis with configurable TTL (default 1 h)
-- **Service registry:** Consul — `register()` on startup, `deregister()` on exit via `atexit`
-- **Deploy:** systemd + Gunicorn on Ubuntu 24.04
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/analysis/health` | Service liveness + dependency status |
+| `POST` | `/analysis/outliers` | Detect outliers in a time series |
+| `POST` | `/analysis/denoise` | Remove noise from a time series |
+| `POST` | `/analysis/regression` | Fit a regression curve to a time series |
+| `POST` | `/analysis/predict` | Forecast future values from a time series |
 
 ---
 
-## Getting started
+## Common request shape
 
-### Prerequisites
+Every analysis endpoint accepts a JSON body with at least:
 
-- Python 3.11+ (tested with 3.12)
-- Redis and Consul are **not required** to run locally — the service starts and `/health`
-  responds even when they are unreachable.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `values` | `float[]` | Yes | Sensor readings (non-empty, no NaN/Inf) |
+| `timestamps` | `string[]` | Yes | ISO-8601 timestamps, same length as `values` |
+| `method` / `model` | `string` | Yes | Algorithm selector (see each endpoint) |
 
-### Setup
+**Minimum data points:** 4 for `/predict` and `/regression`. The `values` and `timestamps` arrays must always have equal length.
+
+**Timestamp format:** ISO-8601, e.g. `"2024-01-15T08:00:00Z"` or `"2024-01-15T08:00:00+00:00"`.
+
+---
+
+## Common error shape
+
+All `400` responses follow:
+
+```json
+{
+  "error": "validation_error",
+  "message": "human-readable description or field-level object"
+}
+```
+
+Field-level errors (when multiple fields are invalid):
+
+```json
+{
+  "error": "validation_error",
+  "message": {
+    "values": ["Must be a non-empty list."],
+    "method": ["Must be one of: 3sigma, chauvenet, iqr."]
+  }
+}
+```
+
+Unexpected server errors return `500`:
+
+```json
+{ "error": "internal_error", "message": "An unexpected error occurred" }
+```
+
+---
+
+## GET /analysis/health
+
+Returns service liveness and the status of dependencies. Always `200` — Redis/Consul failures appear in the body, not as HTTP errors.
+
+### Response `200`
+
+```json
+{
+  "status": "ok",
+  "redis": "connected",
+  "consul": "registered",
+  "version": "1.0.0",
+  "libs": {
+    "pywt": "available",
+    "PyEMD": "available",
+    "statsmodels": "available"
+  }
+}
+```
+
+| Field | Values | Description |
+|---|---|---|
+| `status` | `"ok"` \| `"degraded"` | `"degraded"` if any required lib is missing |
+| `redis` | `"connected"` \| `"unavailable"` | |
+| `consul` | `"registered"` \| `"unregistered"` | |
+| `libs` | object | Each lib is `"available"` or `"unavailable"` |
+
+---
+
+## POST /analysis/outliers
+
+Detects data points that deviate significantly from the rest of the series.
+
+### Request
+
+```json
+{
+  "values":     [1.2, 3.4, 100.0, 2.1, 2.5],
+  "timestamps": [
+    "2024-01-01T00:00:00Z",
+    "2024-01-02T00:00:00Z",
+    "2024-01-03T00:00:00Z",
+    "2024-01-04T00:00:00Z",
+    "2024-01-05T00:00:00Z"
+  ],
+  "method": "3sigma"
+}
+```
+
+| Field | Type | Required | Values |
+|---|---|---|---|
+| `method` | string | Yes | `"3sigma"` \| `"chauvenet"` \| `"iqr"` |
+
+**Methods:**
+- `3sigma` — flags values outside mean ± 3 standard deviations
+- `iqr` — flags values outside Q1 − 1.5·IQR and Q3 + 1.5·IQR
+- `chauvenet` — probabilistic criterion; flags values unlikely given the distribution
+
+### Response `200`
+
+```json
+{
+  "method": "3sigma",
+  "outliers": [
+    {
+      "index": 2,
+      "timestamp": "2024-01-03T00:00:00Z",
+      "value": 100.0,
+      "threshold_upper": 54.3,
+      "threshold_lower": -47.8,
+      "criterion": "exceeds_upper"
+    }
+  ],
+  "statistics": {
+    "mean": 21.84,
+    "std": 38.22,
+    "n": 5,
+    "outlier_count": 1
+  }
+}
+```
+
+**`outliers` item fields:**
+
+| Field | Present in | Description |
+|---|---|---|
+| `index` | all | Position in the original `values` array |
+| `timestamp` | all | Corresponding timestamp |
+| `value` | all | The outlier value |
+| `threshold_upper` | `3sigma`, `iqr` | Upper bound used |
+| `threshold_lower` | `3sigma`, `iqr` | Lower bound used |
+| `criterion` | `3sigma`, `iqr` | `"exceeds_upper"` or `"exceeds_lower"` |
+| `z_score` | `chauvenet` | Z-score of this value |
+| `probability` | `chauvenet` | Tail probability |
+
+---
+
+## POST /analysis/denoise
+
+Smooths a noisy time series using the selected algorithm.
+
+### Request
+
+```json
+{
+  "values":     [1.2, 3.4, 2.8, 2.1, 3.0, 2.5],
+  "timestamps": [
+    "2024-01-01T00:00:00Z",
+    "2024-01-02T00:00:00Z",
+    "2024-01-03T00:00:00Z",
+    "2024-01-04T00:00:00Z",
+    "2024-01-05T00:00:00Z",
+    "2024-01-06T00:00:00Z"
+  ],
+  "method": "wavelet"
+}
+```
+
+| Field | Type | Required | Values |
+|---|---|---|---|
+| `method` | string | Yes | `"wavelet"` \| `"emd"` \| `"svm"` |
+
+**Methods:**
+- `wavelet` — Discrete Wavelet Transform (db4) with soft thresholding (requires `pywt`)
+- `emd` — Empirical Mode Decomposition; removes high-frequency IMFs (requires `PyEMD`)
+- `svm` — SVR with RBF kernel fits a smooth curve through the time index (requires `scikit-learn`)
+
+If an optional library is missing, the endpoint falls back to a moving-average smoother automatically.
+
+### Response `200`
+
+```json
+{
+  "denoised_values": [1.85, 2.60, 2.77, 2.53, 2.70, 2.62],
+  "method": "wavelet",
+  "params": {
+    "wavelet": "db4",
+    "level": 2,
+    "threshold": 1.43,
+    "mode": "soft",
+    "sigma": 0.61
+  }
+}
+```
+
+**`params` fields vary by method:**
+
+`wavelet`:
+
+| Field | Description |
+|---|---|
+| `wavelet` | Wavelet family used (`"db4"`) |
+| `level` | Decomposition level |
+| `threshold` | Applied threshold value |
+| `mode` | Thresholding mode (`"soft"`) |
+| `sigma` | Estimated noise level |
+
+`emd`:
+
+| Field | Description |
+|---|---|
+| `imf_count` | Total number of IMFs decomposed |
+| `removed_imfs` | Indices of removed high-frequency IMFs |
+| `strategy` | Selection strategy (`"zcr_quantile"`) |
+| `quantile` | Quantile threshold used |
+| `zcrs` | Zero-crossing rate per IMF |
+
+`svm`:
+
+| Field | Description |
+|---|---|
+| `kernel` | SVR kernel (`"rbf"`) |
+| `C` | Regularisation parameter |
+| `epsilon` | Epsilon in the loss function |
+| `gamma` | Kernel coefficient |
+| `feature` | Feature used (`"index"`) |
+
+Fallback (library unavailable):
+
+```json
+{ "fallback": "moving_average", "window": 5 }
+```
+
+---
+
+## POST /analysis/regression
+
+Fits a curve to the time series and returns fitted values and goodness-of-fit metrics.
+
+### Request
+
+```json
+{
+  "values":     [1.2, 3.4, 2.8, 4.1, 5.0, 4.7],
+  "timestamps": [
+    "2024-01-01T00:00:00Z",
+    "2024-01-02T00:00:00Z",
+    "2024-01-03T00:00:00Z",
+    "2024-01-04T00:00:00Z",
+    "2024-01-05T00:00:00Z",
+    "2024-01-06T00:00:00Z"
+  ],
+  "model":  "polynomial",
+  "degree": 3
+}
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `model` | string | Yes | — | `"polynomial"` \| `"bayesian"` |
+| `degree` | integer | No | `3` | Polynomial degree; must satisfy `1 ≤ degree < len(values)`. Ignored for `bayesian`. |
+
+**Models:**
+- `polynomial` — least-squares polynomial fit of given degree
+- `bayesian` — Bayesian Ridge linear regression (linear in time)
+
+### Response `200`
+
+```json
+{
+  "coefficients":  [0.0003, -0.002, 0.21, 1.1],
+  "fitted_values": [1.31, 2.98, 3.05, 4.02, 4.89, 4.75],
+  "r2_score":      0.982,
+  "model":         "polynomial",
+  "degree":        3
+}
+```
+
+| Field | Description |
+|---|---|
+| `coefficients` | Polynomial coefficients highest-degree first; for `bayesian`: `[intercept, slope]` |
+| `fitted_values` | Fitted value at each input timestamp (same length as `values`) |
+| `r2_score` | Coefficient of determination (0–1; higher is better) |
+| `degree` | Degree used (`null` for `bayesian`) |
+
+---
+
+## POST /analysis/predict
+
+Forecasts future values beyond the last observed timestamp.
+
+### Request
+
+```json
+{
+  "values":      [1.2, 3.4, 2.8, 4.1, 5.0, 4.7],
+  "timestamps":  [
+    "2024-01-01T00:00:00Z",
+    "2024-01-02T00:00:00Z",
+    "2024-01-03T00:00:00Z",
+    "2024-01-04T00:00:00Z",
+    "2024-01-05T00:00:00Z",
+    "2024-01-06T00:00:00Z"
+  ],
+  "model":       "arima",
+  "horizon":     7,
+  "arima_order": [1, 1, 1]
+}
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `model` | string | Yes | — | `"arima"` \| `"gm11"` |
+| `horizon` | integer | Yes | — | Steps to forecast (1–365) |
+| `arima_order` | `[p, d, q]` | No | `[1, 1, 1]` | ARIMA order; 3 non-negative integers. Only used for `arima`. |
+
+**Models:**
+- `arima` — AutoRegressive Integrated Moving Average; best for longer series with trend/seasonality
+- `gm11` — Grey Model GM(1,1); best for short series (4+ points); no confidence intervals
+
+**Minimum data:** 4 values required by both models.
+
+### Response `200`
+
+Headers include `X-Cache: HIT | MISS`.
+
+```json
+{
+  "predicted_values":     [5.1, 5.4, 5.6, 5.8, 5.9, 6.0, 6.1],
+  "predicted_timestamps": [
+    "2024-01-07T00:00:00Z",
+    "2024-01-08T00:00:00Z",
+    "2024-01-09T00:00:00Z",
+    "2024-01-10T00:00:00Z",
+    "2024-01-11T00:00:00Z",
+    "2024-01-12T00:00:00Z",
+    "2024-01-13T00:00:00Z"
+  ],
+  "confidence_lower": [4.7, 4.8, 4.9, 5.0, 5.0, 5.0, 5.0],
+  "confidence_upper": [5.5, 6.0, 6.3, 6.6, 6.8, 7.0, 7.2],
+  "model":   "arima",
+  "horizon": 7,
+  "order":   [1, 1, 1]
+}
+```
+
+| Field | Description |
+|---|---|
+| `predicted_values` | Forecasted values; length = `horizon` |
+| `predicted_timestamps` | Future timestamps inferred from the input frequency |
+| `confidence_lower` | 95 % lower bound (`null` for `gm11`) |
+| `confidence_upper` | 95 % upper bound (`null` for `gm11`) |
+| `order` | ARIMA order used (`null` for `gm11`) |
+
+---
+
+## Caching
+
+All analysis endpoints cache results in Redis (default TTL: 1 hour). The cache key is a SHA-256 hash of the exact request body. Identical requests return the cached result immediately — the `X-Cache` header (`HIT` / `MISS`) indicates cache status on `/predict` and `/regression`. Redis is optional; the service degrades gracefully when it is unreachable.
+
+---
+
+## Running locally
 
 ```bash
 git clone <repo-url>
@@ -62,68 +409,20 @@ cd data-analysis-service
 
 python3 -m venv .venv
 source .venv/bin/activate
-
 pip install -r requirements.txt -r requirements-dev.txt
-```
 
-### Configure
-
-```bash
-cp .env.example .env
-# Fill in values — at minimum leave defaults for local dev
-```
-
-### Run
-
-```bash
 FLASK_APP=main.py flask run --port 8090
 ```
 
-The Swagger UI is available at `http://localhost:8090/swagger-ui`.
+Swagger UI: `http://localhost:8090/swagger-ui`
 
----
-
-## Project structure
-
-```
-data-analysis-service/
-├── app/
-│   ├── __init__.py          # create_app() factory
-│   ├── config.py            # env-var config (ANALYSIS__ prefix)
-│   ├── cache.py             # Redis wrapper
-│   ├── consul.py            # Consul register/deregister
-│   └── routes/
-│       ├── health.py        # GET /health
-│       ├── outliers.py      # POST /analysis/outliers
-│       ├── denoise.py       # POST /analysis/denoise
-│       ├── regression.py    # POST /analysis/regression
-│       └── predict.py       # POST /analysis/predict
-├── services/
-│   ├── outliers_service.py  # detect_outliers() — raises NotImplementedError
-│   ├── denoise_service.py   # denoise()
-│   ├── regression_service.py# fit_regression()
-│   └── predict_service.py   # predict()
-├── tests/
-│   ├── conftest.py          # app fixture (Redis + Consul mocked)
-│   ├── test_health.py
-│   ├── test_outliers.py
-│   ├── test_denoise.py
-│   ├── test_regression.py
-│   └── test_predict.py
-├── deploy/
-│   ├── data-analysis.service# systemd unit
-│   └── .env.example
-├── requirements.txt         # pinned production deps — do not edit
-├── requirements-dev.txt     # pytest, flake8, flask-smorest, marshmallow, requests
-└── .github/workflows/ci.yml # install + flake8 + pytest
-```
+Redis and Consul are optional — the service starts and all endpoints work without them.
 
 ---
 
 ## Configuration
 
-All variables use the `ANALYSIS__` prefix. Section separators use double underscores
-(`ANALYSIS__REDIS__HOST` → `config.REDIS_HOST`).
+All variables use the `ANALYSIS__` prefix.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -131,90 +430,17 @@ All variables use the `ANALYSIS__` prefix. Section separators use double undersc
 | `ANALYSIS__HOST` | `0.0.0.0` | Bind address |
 | `ANALYSIS__ENV` | `dev` | Environment (`dev` / `staging` / `prod`) |
 | `ANALYSIS__VERSION` | `1.0.0` | Reported in `/health` |
-| `ANALYSIS__INSTANCE_ID` | `data-analysis-01` | Consul service ID (must be unique per instance) |
+| `ANALYSIS__INSTANCE_ID` | `data-analysis-01` | Consul service ID (unique per instance) |
+| `ANALYSIS__ROUTE_PREFIX` | _(empty)_ | Optional URL prefix for all routes |
+| `ANALYSIS__PUBLIC_URL_PREFIX` | _(empty)_ | Base URL reported in OpenAPI spec |
 | `ANALYSIS__REDIS__HOST` | `localhost` | Redis host |
 | `ANALYSIS__REDIS__PORT` | `6379` | Redis port |
 | `ANALYSIS__REDIS__PASSWORD` | _(empty)_ | Redis password |
-| `ANALYSIS__REDIS__CACHE_TTL_SECONDS` | `3600` | Default cache TTL (1 h) |
+| `ANALYSIS__REDIS__CACHE_TTL_SECONDS` | `3600` | Cache TTL in seconds |
 | `ANALYSIS__CONSUL__HOST` | `localhost` | Consul host |
 | `ANALYSIS__CONSUL__PORT` | `8500` | Consul HTTP port |
 | `ANALYSIS__CONSUL__TOKEN` | _(empty)_ | Consul ACL token |
-| `ANALYSIS__CONSUL__HEALTH_PORT` | `9090` | Port Consul uses for its health check |
-
----
-
-## Endpoints
-
-| Method | Path | Status | Card |
-|---|---|---|---|
-| `GET` | `/health` | Implemented | — |
-| `POST` | `/analysis/outliers` | Stub (501) | 4A1 |
-| `POST` | `/analysis/denoise` | Stub (501) | 4A2 |
-| `POST` | `/analysis/regression` | Stub (501) | 4B1 |
-| `POST` | `/analysis/predict` | Stub (501) | 4B2 |
-
-### GET /health
-
-Always returns `200`. Redis and Consul failures are reported in the body, not as HTTP errors.
-
-```json
-{
-  "status": "ok",
-  "redis": "connected",
-  "consul": "registered",
-  "version": "1.0.0"
-}
-```
-
-### POST /analysis/outliers
-
-```json
-// Request
-{
-  "values":     [1.2, 3.4, 100.0, 2.1],
-  "timestamps": ["2019-06-01T00:00:00Z", "2019-06-02T00:00:00Z", "..."],
-  "method":     "3sigma"   // enum: "3sigma" | "chauvenet" | "iqr"
-}
-
-// 501 stub response
-{ "error": "not_implemented", "message": "Outlier detection not yet implemented (Card 4A1)" }
-```
-
-### POST /analysis/denoise
-
-```json
-{
-  "values":     [1.2, 3.4, 2.8, 2.1],
-  "timestamps": ["2019-06-01T00:00:00Z", "..."],
-  "method":     "wavelet"  // enum: "wavelet" | "emd" | "svm"
-}
-```
-
-### POST /analysis/regression
-
-```json
-{
-  "values":     [1.2, 3.4, 2.8, 2.1],
-  "timestamps": ["2019-06-01T00:00:00Z", "..."],
-  "model":      "polynomial",  // enum: "polynomial" | "bayesian"
-  "degree":     3              // optional, default 3, only used for polynomial
-}
-```
-
-### POST /analysis/predict
-
-```json
-{
-  "values":      [1.2, 3.4, 2.8, 2.1],
-  "timestamps":  ["2019-06-01T00:00:00Z", "..."],
-  "model":       "arima",      // enum: "arima" | "gm11"
-  "horizon":     30,
-  "arima_order": [1, 1, 1]    // optional, only for arima
-}
-```
-
-All endpoints return `400` with a descriptive `message` if the request body fails schema
-validation (missing required field, wrong type, value outside enum).
+| `ANALYSIS__CONSUL__HEALTH_PORT` | `9090` | Port Consul uses for health checks |
 
 ---
 
@@ -224,14 +450,7 @@ validation (missing required field, wrong type, value outside enum).
 pytest --tb=short -q
 ```
 
-Tests run fully offline — Redis and Consul are mocked in `tests/conftest.py`. There are
-18 tests covering:
-
-- `200` from `/health` under connected and disconnected infra
-- `501` from each analysis endpoint with a valid payload
-- `400` from each endpoint with missing fields, wrong types, and invalid enum values
-
-To run linting:
+Tests run fully offline — Redis and Consul are mocked. Linting:
 
 ```bash
 flake8 app/ services/ tests/
@@ -239,66 +458,25 @@ flake8 app/ services/ tests/
 
 ---
 
-## Adding a new algorithm
-
-Each card follows the same three-step pattern. Example for Card 4A1 (outlier detection):
-
-**1. Implement the service** (`services/outliers_service.py`):
-
-```python
-import numpy as np  # now you can add imports
-
-def detect_outliers(values, timestamps, method):
-    if method == "3sigma":
-        # ... real implementation
-        return {"outliers": [...]}
-    raise ValueError(f"Unknown method: {method}")
-```
-
-**2. Update the route** (`app/routes/outliers.py`) — remove the `try/except NotImplementedError`
-block and return the service result with `200`.
-
-**3. Update the test** (`tests/test_outliers.py`) — change the expected status from `501` to
-`200` and assert the response body structure.
-
-The cache helpers are ready to use:
-
-```python
-from app import cache
-from app.config import Config
-
-cached = cache.get_cached(key)
-if cached is None:
-    result = compute_something()
-    cache.set_cached(key, result, Config.REDIS_CACHE_TTL_SECONDS)
-```
-
----
-
 ## Deploy
 
-The service runs as a dedicated `data-analysis` system user under systemd on Ubuntu 24.04.
-Two workers run in a single Gunicorn process (not two separate systemd units).
+The service runs under systemd + Gunicorn on Ubuntu 24.04.
 
-### First-time setup on the server
+### First-time setup
 
 ```bash
-# Create user and directories
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin data-analysis
 sudo mkdir -p /opt/data-analysis /etc/data-analysis
 
-# Deploy application code
 sudo rsync -a . /opt/data-analysis/
 sudo python3 -m venv /opt/data-analysis/.venv
-sudo /opt/data-analysis/.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+sudo /opt/data-analysis/.venv/bin/pip install -r requirements.txt
 
-# Write secrets (never commit this file)
 sudo cp deploy/.env.example /etc/data-analysis/secrets
-sudo nano /etc/data-analysis/secrets          # fill in real values
+sudo nano /etc/data-analysis/secrets
 sudo chmod 600 /etc/data-analysis/secrets
 sudo chown data-analysis: /etc/data-analysis/secrets
 
-# Install and start the systemd unit
 sudo cp deploy/data-analysis.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now data-analysis
@@ -308,7 +486,7 @@ sudo systemctl enable --now data-analysis
 
 ```bash
 sudo systemctl status data-analysis
-sudo journalctl -u data-analysis -f       # follow logs
+sudo journalctl -u data-analysis -f
 sudo systemctl restart data-analysis
 ```
 
@@ -318,15 +496,3 @@ sudo systemctl restart data-analysis
 sudo rsync -a . /opt/data-analysis/
 sudo systemctl restart data-analysis
 ```
-
----
-
-## Cards
-
-| Card | Description | Status |
-|---|---|---|
-| **4X0** | Service skeleton — structure, contracts, stubs, CI | Done |
-| **4A1** | Outlier detection (3-sigma, Chauvenet, IQR) | Pending |
-| **4A2** | Denoising (Wavelet, EMD, SVM) | Pending |
-| **4B1** | Regression (Polynomial, Bayesian) | Pending |
-| **4B2** | Prediction (ARIMA, GM(1,1)) | Pending |

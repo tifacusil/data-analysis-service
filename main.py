@@ -138,7 +138,7 @@ def _outliers_chauvenet(values: np.ndarray) -> tuple[list[int], dict[str, float]
 def create_app() -> Flask:
     app = Flask(__name__)
 
-    @app.get("/health")
+    @app.get("/analysis/health")
     def health():
         return jsonify({"status": "healthy", "service": "data-analysis", "version": "1.0.0"})
 
