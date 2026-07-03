@@ -8,7 +8,13 @@ User=data-analysis
 Group=data-analysis
 WorkingDirectory=/opt/data-analysis
 EnvironmentFile=/etc/data-analysis/secrets
+# Per-worker Prometheus metrics are aggregated from this dir (see
+# deploy/gunicorn.conf.py). RuntimeDirectory makes /run/data-analysis, owned by
+# the service user and wiped on every restart.
+RuntimeDirectory=data-analysis
+Environment=PROMETHEUS_MULTIPROC_DIR=/run/data-analysis/prometheus
 ExecStart=/opt/data-analysis/.venv/bin/gunicorn \
+    --config /opt/data-analysis/deploy/gunicorn.conf.py \
     --bind ${ANALYSIS__HOST}:${ANALYSIS__PORT} \
     --workers 2 \
     --timeout 60 \

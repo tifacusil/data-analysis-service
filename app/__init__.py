@@ -66,6 +66,9 @@ def create_app(config=None):
         app.register_blueprint(regression_blp, url_prefix=url_prefix)
         app.register_blueprint(predict_blp, url_prefix=url_prefix)
 
+    from app.metrics import init_metrics
+    init_metrics(app)
+
     from app import consul
     consul.register()
     atexit.register(consul.deregister)
