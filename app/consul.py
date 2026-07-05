@@ -28,6 +28,7 @@ def register() -> None:
         payload = {
             "ID": Config.INSTANCE_ID,
             "Name": "data-analysis",
+            "Address": check_host,
             "Port": int(Config.PORT),
             "Tags": [
                 f"version:{Config.VERSION}",
