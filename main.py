@@ -7,6 +7,7 @@ from typing import Any, Literal
 import numpy as np
 from dotenv import find_dotenv, load_dotenv
 from flask import Flask, jsonify, request
+from prometheus_flask_exporter import PrometheusMetrics
 from scipy.stats import norm
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
@@ -137,6 +138,12 @@ def _outliers_chauvenet(values: np.ndarray) -> tuple[list[int], dict[str, float]
 
 def create_app() -> Flask:
     app = Flask(__name__)
+
+    # Expone /metrics: process_cpu_seconds_total, process_resident_memory_bytes
+    # (ProcessCollector automatico) + flask_http_request_duration_seconds
+    # (histogram por endpoint, agrupado por endpoint => habilita
+    # histogram_quantile para p50/p90/p95/p99).
+    PrometheusMetrics(app, group_by="endpoint")
 
     @app.get("/analysis/health")
     def health():
