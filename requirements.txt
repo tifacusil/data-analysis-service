@@ -17,6 +17,7 @@ prometheus_flask_exporter==0.23.1
 patsy==1.0.2
 POT==0.9.6.post1
 prometheus-client==0.21.1
+psutil==6.1.1
 pyemd==1.1.0; python_version < "3.12"
 pyemd==2.0.0; python_version >= "3.12"
 python-dotenv==1.0.1

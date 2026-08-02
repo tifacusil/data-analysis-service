@@ -45,9 +45,15 @@ When `PROMETHEUS_MULTIPROC_DIR` is **unset** (e.g. `flask run` in dev) the app
 falls back to the plain in-process default registry.
 
 > **Caveat:** in multiprocess mode `MultiProcessCollector` does **not** export
-> the default `process_*`, `python_gc_*`, or `python_info` series — that is a
+> the default `python_gc_*` or `python_info` series — that is a
 > `prometheus_client` limitation. Those appear only in single-process/dev mode.
 > The custom `http_*` metrics below are exported in both modes.
+>
+> `process_cpu_seconds_total` / `process_resident_memory_bytes` are the
+> exception: the built-in `ProcessCollector` is unregistered and replaced with
+> `psutil`-backed gauges (`multiprocess_mode="liveall"`, one series per worker
+> `pid`) in `app/metrics.py`, so both are exported in every mode — needed to
+> compare CPU/memory against the Go services in the benchmark dashboard.
 
 ---
 
@@ -91,14 +97,13 @@ Buckets = `prometheus_client` defaults
 
 ## Default (process / runtime) metrics
 
-Auto-exported by `prometheus_client` on the default registry — no app code.
-**Present only in single-process/dev mode** (see the multiprocess caveat above):
-
-- `process_*` — e.g. `process_resident_memory_bytes`, `process_cpu_seconds_total`,
-  `process_open_fds`, `process_start_time_seconds`.
-- `python_gc_*` — `python_gc_objects_collected_total`,
-  `python_gc_collections_total`, etc.
-- `python_info{version=...,implementation=...}` — build info.
+- `process_cpu_seconds_total`, `process_resident_memory_bytes` — custom
+  `psutil`-backed gauges in `app/metrics.py`, sampled on every `/metrics`
+  scrape. Exported in **both** single-process and multiprocess mode, labeled
+  `{pid=...}` per worker (see the multiprocess caveat above).
+- `python_gc_*`, `python_info`, `process_open_fds`, `process_start_time_seconds`
+  — auto-exported by `prometheus_client`'s built-in collectors. **Present only
+  in single-process/dev mode** (excluded by `MultiProcessCollector`).
 
 ---
 
